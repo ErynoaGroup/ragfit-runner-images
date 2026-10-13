@@ -20,24 +20,26 @@ There is no `latest` tag; pin images by digest.
 ## Verification
 
 Images are signed keyless with [cosign](https://github.com/sigstore/cosign) (GitHub OIDC,
-public Rekor transparency log) and carry an SPDX SBOM attestation.
+public Rekor transparency log) and carry an SPDX SBOM attestation. Only the `images.yml`
+workflow on `main` publishes and signs; verify against exactly that identity:
 
 ```sh
-cosign verify \
-  --certificate-identity-regexp '^https://github\.com/ErynoaGroup/ragfit-runner-images/\.github/workflows/images\.yml@refs/heads/main$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+ID=https://github.com/ErynoaGroup/ragfit-runner-images/.github/workflows/images.yml@refs/heads/main
+ISSUER=https://token.actions.githubusercontent.com
+
+cosign verify --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER" \
   ghcr.io/erynoagroup/ragfit-runner-node@sha256:<digest>
 
 cosign verify-attestation --type spdxjson \
-  --certificate-identity-regexp '^https://github\.com/ErynoaGroup/ragfit-runner-images/\.github/workflows/images\.yml@refs/heads/main$' \
-  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "$ID" --certificate-oidc-issuer "$ISSUER" \
   ghcr.io/erynoagroup/ragfit-runner-node@sha256:<digest>
 ```
 
 ## Build
 
-Pull requests build the images without pushing. Pushes to `main`, `v*` tags and manual
-dispatches build, push, sign and attest.
+Pushes to `main` and manual dispatches on `main` build, push, sign and attest.
+Pull requests, tags and manual dispatches from any other branch build only, without
+pushing or signing. Only digests built from `main` are meant to be consumed.
 
 ## License
 
