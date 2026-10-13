@@ -1,0 +1,16 @@
+# growth-budget.toml — anti-bloat budgets (warn only).
+mode = "warn"
+work_root = "docs/work"
+exclude = []
+
+[artifacts]
+max_commit_bytes = 2_000_000
+max_commit_new_files = 100
+allow_paths = []
+
+[tests]
+max_growth_ratio = 1.0
+min_allowance = 150
+max_fix_new_tests = 1
+max_test_file_lines = 800
+ratio_tolerance = 0.05
