@@ -1,7 +1,8 @@
 name: images
-# Builds the runner job images. Pull requests build only (no push).
-# Pushes to main, version tags and manual dispatches publish to GHCR,
-# sign keyless with cosign (GitHub OIDC, Rekor) and attach an SPDX SBOM attestation.
+# Builds the runner job images.
+# Only refs/heads/main (push or workflow_dispatch on main) publishes to GHCR, signs keyless
+# with cosign (GitHub OIDC, Rekor) and attaches an SPDX SBOM attestation.
+# Pull requests, tags and dispatches from other branches build only: no push, no signature.
 # Tags: image version + sha-<commit>. No latest tag; consumers pin by digest.
 on:
   push:
@@ -18,7 +19,7 @@ concurrency:
 
 jobs:
   build:
-    if: ${{ github.event_name == 'pull_request' }}
+    if: ${{ !(github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')) }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -64,7 +65,7 @@ jobs:
           upload-release-assets: false
 
   publish:
-    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    if: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -134,9 +135,10 @@ jobs:
       - name: Verify signature and attestation (by digest)
         env:
           REF: ${{ steps.v.outputs.image }}@${{ steps.build.outputs.digest }}
-          ID: https://github.com/${{ github.workflow_ref }}
+          ID: https://github.com/ErynoaGroup/ragfit-runner-images/.github/workflows/images.yml@refs/heads/main
         run: |
           set -euo pipefail
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::publish outside main"; exit 1; }
           cosign verify --certificate-identity "$ID" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REF" >/dev/null
           cosign verify-attestation --type spdxjson --certificate-identity "$ID" \
