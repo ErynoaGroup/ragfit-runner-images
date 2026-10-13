@@ -1,0 +1,144 @@
+name: images
+# Builds the runner job images. Pull requests build only (no push).
+# Pushes to main, version tags and manual dispatches publish to GHCR,
+# sign keyless with cosign (GitHub OIDC, Rekor) and attach an SPDX SBOM attestation.
+# Tags: image version + sha-<commit>. No latest tag; consumers pin by digest.
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: images-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: ${{ github.event_name == 'pull_request' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [node, rust, go, nix]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Determine version tag
+        id: v
+        env:
+          IMG: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^LABEL org.opencontainers.image.version="\([^"]*\)".*/\1/p' "images/$IMG/Dockerfile")
+          [[ -n "$ver" ]] || { echo "::error::images/$IMG/Dockerfile has no version label"; exit 1; }
+          echo "image=ghcr.io/erynoagroup/ragfit-runner-$IMG" >> "$GITHUB_OUTPUT"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - name: Build (no push)
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: images/${{ matrix.image }}
+          platforms: linux/amd64
+          push: false
+          load: true
+          provenance: false
+          tags: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@7b36ad622f042cab6f59a75c2ac24ccb256e9b45 # v0.20.4
+        with:
+          image: ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.image }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+  publish:
+    if: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+    strategy:
+      fail-fast: false
+      matrix:
+        image: [node, rust, go, nix]
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Determine version tag
+        id: v
+        env:
+          IMG: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          ver=$(sed -n 's/^LABEL org.opencontainers.image.version="\([^"]*\)".*/\1/p' "images/$IMG/Dockerfile")
+          [[ -n "$ver" ]] || { echo "::error::images/$IMG/Dockerfile has no version label"; exit 1; }
+          echo "image=ghcr.io/erynoagroup/ragfit-runner-$IMG" >> "$GITHUB_OUTPUT"
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@e468171a9de216ec08956ac3ada2f0791b6bd435 # v3.11.1
+
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159 # v3.9.2
+
+      - name: Log in to GHCR
+        uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push
+        id: build
+        uses: docker/build-push-action@263435318d21b8e681c14492fe198d362a7d2c83 # v6.18.0
+        with:
+          context: images/${{ matrix.image }}
+          platforms: linux/amd64
+          push: true
+          provenance: false
+          tags: |
+            ${{ steps.v.outputs.image }}:${{ steps.v.outputs.version }}
+            ${{ steps.v.outputs.image }}:sha-${{ github.sha }}
+
+      - name: SBOM (SPDX)
+        uses: anchore/sbom-action@7b36ad622f042cab6f59a75c2ac24ccb256e9b45 # v0.20.4
+        with:
+          image: ${{ steps.v.outputs.image }}@${{ steps.build.outputs.digest }}
+          format: spdx-json
+          output-file: sbom-${{ matrix.image }}.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Sign and attest SBOM (keyless)
+        env:
+          REF: ${{ steps.v.outputs.image }}@${{ steps.build.outputs.digest }}
+          IMG: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          cosign sign --yes "$REF"
+          cosign attest --yes --type spdxjson --predicate "sbom-$IMG.spdx.json" "$REF"
+
+      - name: Verify signature and attestation (by digest)
+        env:
+          REF: ${{ steps.v.outputs.image }}@${{ steps.build.outputs.digest }}
+          ID: https://github.com/${{ github.workflow_ref }}
+        run: |
+          set -euo pipefail
+          cosign verify --certificate-identity "$ID" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REF" >/dev/null
+          cosign verify-attestation --type spdxjson --certificate-identity "$ID" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REF" >/dev/null
+          echo "| ${{ matrix.image }} | ${{ steps.v.outputs.version }} | \`$REF\` |" >> "$GITHUB_STEP_SUMMARY"
