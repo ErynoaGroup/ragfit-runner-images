@@ -76,6 +76,10 @@ jobs:
       matrix:
         image: [node, rust, go, nix]
     steps:
+      - name: Guard - publish only from main (fail closed)
+        run: |
+          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::publish outside main: $GITHUB_REF"; exit 1; }
+
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
@@ -138,7 +142,6 @@ jobs:
           ID: https://github.com/ErynoaGroup/ragfit-runner-images/.github/workflows/images.yml@refs/heads/main
         run: |
           set -euo pipefail
-          [[ "$GITHUB_REF" == "refs/heads/main" ]] || { echo "::error::publish outside main"; exit 1; }
           cosign verify --certificate-identity "$ID" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com "$REF" >/dev/null
           cosign verify-attestation --type spdxjson --certificate-identity "$ID" \
