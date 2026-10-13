@@ -1,0 +1,22 @@
+# pre-commit: stamp and boundary guard (hard), gitleaks (hard).
+repos:
+  - repo: local
+    hooks:
+      - id: stamp
+        name: repository stamp
+        language: system
+        entry: just stamp
+        pass_filenames: false
+        always_run: true
+      - id: boundary-guard
+        name: boundary guard (staged)
+        language: system
+        entry: env BOUNDARY_GUARD_CACHED=1 scripts/boundary-guard.sh
+        pass_filenames: false
+        always_run: true
+      - id: gitleaks
+        name: gitleaks (staged)
+        language: system
+        entry: gitleaks git --staged --redact --no-banner
+        pass_filenames: false
+        always_run: true

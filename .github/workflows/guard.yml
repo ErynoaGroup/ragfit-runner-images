@@ -1,0 +1,55 @@
+name: guard
+# Repository stamp, boundary guard and secret scan on GitHub-hosted runners.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+      - name: Repository stamp
+        run: |
+          set -euo pipefail
+          test -f erynoa.md && grep -q 'AGENT-PLANNER:BEGIN' erynoa.md
+          test -f flake.nix && test -f justfile && test -f growth-budget.toml
+          grep -q 'erynoa.md' AGENTS.md
+          test -d docs/decisions && test -d docs/work
+      - name: Boundary guard
+        env:
+          BOUNDARY_GUARD_EXTRA: ${{ secrets.BOUNDARY_GUARD_EXTRA }}
+        run: ./scripts/boundary-guard.sh
+      - name: Boundary guard tests
+        env:
+          BOUNDARY_GUARD_EXTRA: ${{ secrets.BOUNDARY_GUARD_EXTRA }}
+        run: |
+          shellcheck scripts/boundary-guard.sh tests/boundary-guard.test.sh
+          tests/boundary-guard.test.sh
+
+  gitleaks:
+    runs-on: ubuntu-latest
+    env:
+      GITLEAKS_VERSION: 8.30.1
+      GITLEAKS_SHA256: 551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install gitleaks (pinned by checksum)
+        run: |
+          set -euo pipefail
+          f="gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz"
+          curl -fsSL -o "$f" "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/$f"
+          echo "${GITLEAKS_SHA256}  $f" | sha256sum -c -
+          tar xzf "$f" gitleaks
+      - name: Scan full history
+        run: ./gitleaks git --redact --no-banner --exit-code 1 .
