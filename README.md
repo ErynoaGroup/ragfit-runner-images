@@ -41,6 +41,14 @@ Pushes to `main` and manual dispatches on `main` build, push, sign and attest.
 Pull requests, tags and manual dispatches from any other branch build only, without
 pushing or signing. Only digests built from `main` are meant to be consumed.
 
+## flake.lock
+
+`flake.lock` is generated in CI only. The manual workflow `flake-lock` runs
+`nix flake lock` on a GitHub-hosted runner and pushes exactly one commit to a new
+branch `ci/flake-lock-<run id>`. The workflow does not open pull requests
+(Actions are not allowed to create them); a maintainer opens the one-commit PR
+from that branch manually.
+
 ## License
 
 Apache License 2.0, see [LICENSE](LICENSE) and [NOTICE](NOTICE).
