@@ -1,0 +1,64 @@
+name: flake-lock
+
+# Erzeugt flake.lock auf einem freien GitHub-Runner und pusht genau einen Commit
+# auf einen neuen Branch. Der Workflow öffnet keinen PR (Actions dürfen keine PRs
+# anlegen); ein Maintainer öffnet den Ein-Commit-PR aus dem Branch manuell.
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: flake-lock
+  cancel-in-progress: false
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - uses: DeterminateSystems/nix-installer-action@e50d5f73bfe71c2dd0aa4218de8f4afa59f8f81d # v16
+
+      - name: flake.lock erzeugen
+        run: nix flake lock
+
+      - name: Commit
+        id: commit
+        run: |
+          set -euo pipefail
+          git add flake.lock
+          if git diff --cached --quiet; then
+            echo "flake.lock unverändert, nichts zu tun." >> "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git -c user.name="Niklas Klein" -c user.email="niklas.klein""@""erynoa.com" \
+            commit -m "flake.lock per CI erzeugt (nix flake lock)"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+      # Token nur in diesem Schritt, nur im Prozess (git -c), nie in .git/config.
+      - name: Branch pushen
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ci/flake-lock-${{ github.run_id }}
+          BASE: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          auth=$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)
+          echo "::add-mask::${auth}"
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic ${auth}" \
+            push origin "HEAD:refs/heads/${BRANCH}"
+          {
+            echo "Branch \`${BRANCH}\` gepusht (ein Commit, nur flake.lock)."
+            echo ""
+            echo "Ein Maintainer öffnet den PR manuell: base \`${BASE}\`, head \`${BRANCH}\`:"
+            echo "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/${BASE}...${BRANCH}?expand=1"
+          } >> "$GITHUB_STEP_SUMMARY"
