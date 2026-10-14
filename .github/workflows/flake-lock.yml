@@ -1,0 +1,63 @@
+name: flake-lock
+
+# Erzeugt flake.lock auf einem freien GitHub-Runner und öffnet dafür einen
+# eigenen PR mit genau einem Commit. Nur manuell auslösbar.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: flake-lock
+  cancel-in-progress: false
+
+jobs:
+  lock:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: true
+
+      - uses: DeterminateSystems/nix-installer-action@e50d5f73bfe71c2dd0aa4218de8f4afa59f8f81d # v16
+
+      - name: flake.lock erzeugen
+        run: nix flake lock
+
+      - name: Commit und Branch
+        id: commit
+        env:
+          BRANCH: ci/flake-lock-${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          git add flake.lock
+          if git diff --cached --quiet; then
+            echo "flake.lock unverändert, nichts zu tun." >> "$GITHUB_STEP_SUMMARY"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          git -c user.name="Niklas Klein" -c user.email="niklas.klein""@""erynoa.com" \
+            commit -m "flake.lock per CI erzeugt (nix flake lock)"
+          git push origin "HEAD:refs/heads/${BRANCH}"
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+
+      - name: PR öffnen
+        if: steps.commit.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BRANCH: ${{ steps.commit.outputs.branch }}
+          BASE: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if gh pr create --base "$BASE" --head "$BRANCH" \
+               --title "flake.lock per CI erzeugt" \
+               --body "Automatisch erzeugt durch den Workflow flake-lock (Run ${{ github.run_id }}). Ein Commit, nur flake.lock."; then
+            echo "PR für ${BRANCH} geöffnet." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "PR-Erstellung durch Actions blockiert (Org-/Repo-Einstellung). Branch ${BRANCH} ist gepusht; PR bitte manuell öffnen." >> "$GITHUB_STEP_SUMMARY"
+            echo "::warning::PR-Erstellung blockiert, Branch ${BRANCH} gepusht."
+          fi
