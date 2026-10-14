@@ -24,8 +24,17 @@
 | **Purpose** | Runner job images (node, rust, go, nix), published to GHCR with cosign keyless signatures and SPDX SBOM attestations |
 | **Status** | active |
 | **Stack** | Dockerfiles, GitHub Actions (GitHub-hosted runners), cosign, syft |
+| **Visibility** | public |
 | **License** | Apache-2.0 |
 | **last_reviewed** | 2026-10-14 |
+
+## Secrets & settings (set by Niklas only)
+
+| Name | Kind | Purpose |
+|------|------|---------|
+| `BOUNDARY_GUARD_EXTRA` | Actions secret | Newline-separated ERE patterns for internal names that must not appear in git. `boundary-guard.conf` declares `require-extra`, so the guard fails closed (exit 2) until it is set. |
+
+Agents never create or change secrets, variables or repository settings, and never set `BOUNDARY_GUARD_ALLOW_NO_EXTRA`.
 
 ## Invariants
 
